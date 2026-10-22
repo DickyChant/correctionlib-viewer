@@ -1,0 +1,11 @@
+# The actions the workflows use. correctionlib itself is followed by
+# workflows/correctionlib-update.yml, since moving it means rebuilding dist/.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']

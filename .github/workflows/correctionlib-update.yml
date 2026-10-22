@@ -1,0 +1,138 @@
+# Keeps up with correctionlib. Weekly it asks PyPI for the latest correctionlib
+# release, and if that is newer than CORRECTIONLIB_VERSION it moves the version,
+# rebuilds dist/, runs the action's check against that version's Python package
+# and opens a pull request. The pull request is opened whether or not the build
+# and the check pass, with their results in its description, so that a release
+# that needs work on the build gets a place to do it.
+#
+# A version is proposed once: while its pull request is open, or after it was
+# closed, this workflow leaves it alone (as Dependabot does). Running it by hand
+# with a version proposes that version regardless of closed pull requests, e.g.
+# to try a release candidate.
+#
+# Pull requests opened with GITHUB_TOKEN start no workflows, so this one starts
+# CI on the pull request's branch itself. "Allow GitHub Actions to create and
+# approve pull requests" has to be on in the repository settings
+# (Actions → General) once.
+name: correctionlib update
+
+on:
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to move to instead of the latest release on PyPI, e.g. a release candidate
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Compare the latest correctionlib with CORRECTIONLIB_VERSION
+        id: version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          current=$(tr -d '[:space:]' < CORRECTIONLIB_VERSION)
+          target=${REQUESTED:-$(curl -sSf https://pypi.org/pypi/correctionlib/json | jq -r .info.version)}
+          if ! [[ $target =~ ^[0-9]+(\.[0-9]+)*((a|b|rc)[0-9]+)?$ ]]; then
+            echo "::error::Not a correctionlib version: '$target'"
+            exit 1
+          fi
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "This repository builds correctionlib $current; the version to move to is $target."
+          if [ "$target" = "$current" ]; then
+            echo "Nothing to do."
+            exit 0
+          fi
+          if [ -z "$REQUESTED" ] && [ "$(printf '%s\n' "$current" "$target" | sort -V | tail -n 1)" = "$current" ]; then
+            echo "$target is older than $current. Nothing to do."
+            exit 0
+          fi
+          prs=$(gh pr list --head "update/correctionlib-$target" --state all --json number,state --jq '.[] | "#\(.number) \(.state)"')
+          if grep -q OPEN <<< "$prs" || { [ -n "$prs" ] && [ -z "$REQUESTED" ]; }; then
+            echo "There is a pull request for correctionlib $target already: $prs. Nothing to do."
+            exit 0
+          fi
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+
+      - name: Move CORRECTIONLIB_VERSION
+        if: steps.version.outputs.target != ''
+        env:
+          TARGET: ${{ steps.version.outputs.target }}
+        run: echo "$TARGET" > CORRECTIONLIB_VERSION
+
+      - name: Build correctionlib for WebAssembly
+        id: build
+        if: steps.version.outputs.target != ''
+        continue-on-error: true
+        run: |
+          if ! docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD":/src -w /src \
+              emscripten/emsdk:4.0.10 wasm/build.sh; then
+            # a half-written dist/ must not go into the pull request
+            git checkout -- dist
+            git clean -fdq -- dist
+            exit 1
+          fi
+
+      - name: Compare the build with correctionlib's Python package
+        id: check
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        uses: ./
+        with:
+          examples: cms-opendata-run2
+
+      - name: Open the pull request
+        id: pr
+        if: steps.version.outputs.target != ''
+        uses: peter-evans/create-pull-request@v8
+        with:
+          branch: update/correctionlib-${{ steps.version.outputs.target }}
+          title: Move correctionlib to ${{ steps.version.outputs.target }}
+          commit-message: |
+            Move correctionlib to ${{ steps.version.outputs.target }}
+
+            CORRECTIONLIB_VERSION goes from ${{ steps.version.outputs.current }} to ${{ steps.version.outputs.target }}, and dist/ is rebuilt from it.
+          body: |
+            This moves correctionlib from ${{ steps.version.outputs.current }} to [${{ steps.version.outputs.target }}](https://github.com/cms-nanoAOD/correctionlib/releases/tag/v${{ steps.version.outputs.target }}): `CORRECTIONLIB_VERSION`, and `dist/` rebuilt from it.
+
+            | Step | Result |
+            |---|---|
+            | Build (`wasm/build.sh` in `emscripten/emsdk:4.0.10`) | ${{ steps.build.outcome }} |
+            | Check against correctionlib ${{ steps.version.outputs.target }}'s Python package (`tools/node_types.json` and the CMS Open Data examples) | ${{ steps.check.outcome }} |
+
+            The [run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) that opened this has the logs. If the build failed, `dist/` is unchanged and CI fails the same way here; fixes go on this branch.
+
+            After merging, tag a release and move the pins of the repositories that use the action to it.
+
+      - name: Run CI on the pull request's branch
+        if: steps.pr.outputs.pull-request-operation == 'created' || steps.pr.outputs.pull-request-operation == 'updated'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.pr.outputs.pull-request-branch }}
+        run: gh workflow run ci.yml --ref "$BRANCH"
+
+      - name: Fail if the build or the check failed
+        if: steps.build.outcome == 'failure' || steps.check.outcome == 'failure'
+        env:
+          TARGET: ${{ steps.version.outputs.target }}
+          BUILD: ${{ steps.build.outcome }}
+          CHECK: ${{ steps.check.outcome }}
+        run: |
+          echo "::error::correctionlib $TARGET: build $BUILD, check $CHECK"
+          exit 1

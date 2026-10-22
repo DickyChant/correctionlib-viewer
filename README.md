@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0              # each file shows its last commit
-      - uses: DickyChant/correctionlib-viewer@v1.0.0
+      - uses: DickyChant/correctionlib-viewer@v1.1.0
         with:
           title: My corrections
       - uses: actions/upload-pages-artifact@v5
@@ -60,7 +60,11 @@ jobs:
 ```
 
 Then set Pages to "GitHub Actions" in the repository settings. The action
-needs `python3` and `node`, which GitHub's Ubuntu runners have.
+needs `python3` and `node`, which GitHub's Ubuntu runners have. A new release
+of this action, e.g. for a new correctionlib, reaches you when you move the
+version above; [Dependabot](https://docs.github.com/en/code-security/dependabot/working-with-dependabot/keeping-your-actions-up-to-date-with-dependabot)
+opens pull requests for that, also for a pin by commit with the version in a
+comment (`@<sha> # v1.1.0`).
 
 | Input | Default | |
 |---|---|---|
@@ -119,6 +123,22 @@ The page needs a browser with WebAssembly exception handling: Chrome 95,
 Firefox 100, Safari 15.2 or newer. Plotly, marked and DOMPurify come from
 cdnjs, at pinned versions.
 
+## Keeping up with correctionlib
+
+Every Monday, `.github/workflows/correctionlib-update.yml` asks PyPI for the
+latest correctionlib. If it is newer than `CORRECTIONLIB_VERSION`, the workflow
+moves the version, rebuilds `dist/`, runs the check against that version's
+Python package and opens a pull request with the results, whether they passed
+or not, and starts CI on it. Each version is proposed once: closing its pull
+request skips it. Run the workflow by hand with a version to propose that one,
+e.g. a release candidate. After merging, tag a release.
+
+The workflow needs "Allow GitHub Actions to create and approve pull requests"
+in the repository settings (Actions → General). Dependabot
+(`.github/dependabot.yml`) follows the actions the workflows use. The
+Emscripten image and Eigen are pinned in `wasm/build.sh` and the workflows and
+moved by hand, since either changes the bytes of `dist/`.
+
 ## Local use
 
 ```sh
@@ -149,6 +169,7 @@ docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD":/src -w /src \
 | `tools/check_wasm.mjs`, `tools/check_wasm.py` | the check against correctionlib's Python package |
 | `tools/node_types.json` | test file with every node type except lwtnn; not a correction |
 | `examples/` | example sets |
+| `.github/workflows/` | `ci.yml` (the build, the check and this page); `correctionlib-update.yml` (pull requests for new correctionlib releases) |
 
 ## License
 
