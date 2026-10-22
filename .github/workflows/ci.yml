@@ -1,0 +1,58 @@
+# Builds correctionlib for WebAssembly and requires the result to be the
+# committed dist/, so that the action ships exactly what the sources give. Then
+# runs the action on this repository, whose one correction file is
+# tools/node_types.json (every node type), and publishes that page from main.
+#
+# Pages has to be set to "GitHub Actions" in the repository settings once.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Build correctionlib for WebAssembly
+        run: |
+          docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD":/src -w /src \
+            emscripten/emsdk:4.0.10 wasm/build.sh
+
+      - name: Require the committed dist/ to be this build
+        run: |
+          git status --porcelain -- dist
+          test -z "$(git status --porcelain -- dist)"
+
+      - uses: ./
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

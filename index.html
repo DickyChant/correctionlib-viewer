@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>correctionlib viewer</title>
+  <meta name="description" content="Browse, evaluate and plot correctionlib corrections in the browser.">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/3.1.1/plotly-cartesian.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" defer></script>
+  <script type="module" src="js/app.mjs"></script>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="#/">correctionlib viewer</a>
+    <nav>
+      <a href="#/" data-nav="repo">Repository</a>
+      <a href="#/open" data-nav="open">Open a file</a>
+    </nav>
+    <span class="engine" id="engine">loading correctionlib…</span>
+  </header>
+  <div class="layout">
+    <aside id="sidebar" aria-label="Correction sets"></aside>
+    <main id="view"></main>
+  </div>
+  <div id="drop-overlay" hidden><p>Drop correctionlib files to open them</p></div>
+  <noscript><p class="notice">This page needs JavaScript and WebAssembly.</p></noscript>
+</body>
+</html>

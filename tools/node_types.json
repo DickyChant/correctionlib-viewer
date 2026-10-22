@@ -1,0 +1,111 @@
+{
+  "schema_version": 2,
+  "description": "Test file for correctionlib-viewer: every correctionlib node type except lwtnn. Not a physics correction.",
+  "corrections": [
+    {
+      "name": "categories_and_binnings",
+      "description": "Categories with string and integer keys and a default; explicit and uniform binnings with each flow rule.",
+      "version": 1,
+      "inputs": [
+        {"name": "flavour", "type": "string", "description": "a string key"},
+        {"name": "era", "type": "int", "description": "an integer key"},
+        {"name": "x", "type": "real", "description": "binned"},
+        {"name": "phi", "type": "real", "description": "wrapped"}
+      ],
+      "output": {"name": "weight", "type": "real"},
+      "data": {
+        "nodetype": "category",
+        "input": "flavour",
+        "content": [
+          {"key": "b", "value": {
+            "nodetype": "binning", "input": "x", "edges": [0.0, 1.0, 2.5, 5.0, "inf"],
+            "content": [1.1, 1.2, 1.3, 1.4], "flow": "error"
+          }},
+          {"key": "c", "value": {
+            "nodetype": "category", "input": "era",
+            "content": [
+              {"key": 2018, "value": {"nodetype": "binning", "input": "x", "edges": {"n": 4, "low": 0.0, "high": 2.0}, "content": [0.9, 0.95, 1.0, 1.05], "flow": "clamp"}},
+              {"key": 2019, "value": {"nodetype": "binning", "input": "x", "edges": [0.0, 2.0], "content": [0.8], "flow": 0.5}}
+            ]
+          }},
+          {"key": "light", "value": {
+            "nodetype": "binning", "input": "phi", "edges": [-3.14159, 0.0, 3.14159],
+            "content": [0.7, 0.75], "flow": "wrap"
+          }}
+        ],
+        "default": {
+          "nodetype": "binning", "input": "x", "edges": [0.0, 1.0],
+          "content": [1.0],
+          "flow": {"nodetype": "formula", "expression": "1+0.01*x", "parser": "TFormula", "variables": ["x"]}
+        }
+      }
+    },
+    {
+      "name": "grid_and_formulas",
+      "description": "A two-dimensional multibinning whose cells are formulas, generic formulas and constants.",
+      "version": 2,
+      "inputs": [
+        {"name": "pt", "type": "real", "description": "transverse momentum (GeV)"},
+        {"name": "eta", "type": "real", "description": "pseudorapidity"}
+      ],
+      "output": {"name": "sf", "type": "real", "description": "scale factor"},
+      "generic_formulas": [
+        {"nodetype": "formula", "expression": "[0]+[1]*log(x)+[2]*y*y", "parser": "TFormula", "variables": ["pt", "eta"]}
+      ],
+      "data": {
+        "nodetype": "multibinning",
+        "inputs": ["pt", "eta"],
+        "edges": [[20.0, 50.0, 200.0], {"n": 2, "low": -2.5, "high": 2.5}],
+        "content": [
+          {"nodetype": "formularef", "index": 0, "parameters": [1.0, 0.01, 0.002]},
+          {"nodetype": "formularef", "index": 0, "parameters": [0.98, 0.012, 0.001]},
+          {"nodetype": "formula", "expression": "0.99+0.0001*x", "parser": "TFormula", "variables": ["pt"]},
+          1.0
+        ],
+        "flow": "clamp"
+      }
+    },
+    {
+      "name": "transform_and_prng",
+      "description": "A transform that folds eta to |eta| before binning, and a hash PRNG smearing term.",
+      "version": 1,
+      "inputs": [
+        {"name": "eta", "type": "real"},
+        {"name": "event", "type": "int", "description": "event number, seeds the PRNG"},
+        {"name": "mode", "type": "string", "description": "fold, or a hash PRNG draw: smear (stdnormal), flat (stdflat), normal"}
+      ],
+      "output": {"name": "value", "type": "real"},
+      "data": {
+        "nodetype": "category", "input": "mode",
+        "content": [
+          {"key": "fold", "value": {
+            "nodetype": "transform", "input": "eta",
+            "rule": {"nodetype": "formula", "expression": "abs(x)", "parser": "TFormula", "variables": ["eta"]},
+            "content": {"nodetype": "binning", "input": "eta", "edges": [0.0, 1.5, 2.5], "content": [1.0, 1.1], "flow": "clamp"}
+          }},
+          {"key": "smear", "value": {
+            "nodetype": "hashprng", "inputs": ["eta", "event"], "distribution": "stdnormal"
+          }},
+          {"key": "flat", "value": {
+            "nodetype": "hashprng", "inputs": ["eta", "event"], "distribution": "stdflat"
+          }},
+          {"key": "normal", "value": {
+            "nodetype": "hashprng", "inputs": ["eta", "event"], "distribution": "normal"
+          }}
+        ]
+      }
+    }
+  ],
+  "compound_corrections": [
+    {
+      "name": "combined",
+      "description": "grid_and_formulas multiplied by itself, as a compound correction.",
+      "inputs": [{"name": "pt", "type": "real"}, {"name": "eta", "type": "real"}],
+      "output": {"name": "sf", "type": "real"},
+      "inputs_update": [],
+      "input_op": "*",
+      "output_op": "*",
+      "stack": ["grid_and_formulas", "grid_and_formulas"]
+    }
+  ]
+}

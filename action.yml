@@ -1,0 +1,44 @@
+name: correctionlib viewer
+description: >-
+  Stages a page that lists a repository's correctionlib files and evaluates and
+  plots them in the browser, ready for actions/upload-pages-artifact.
+inputs:
+  path:
+    description: The repository with the corrections, checked out with full history (fetch-depth 0) so that each file shows its last commit.
+    default: .
+  output:
+    description: Directory to write the site to (replaced).
+    default: _site
+  title:
+    description: Title of the page.
+    default: ''
+  check:
+    description: Evaluate every correction at sampled points with the WebAssembly build and with correctionlib's Python package, and fail if they disagree.
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - name: Stage the site
+      shell: bash
+      env:
+        REPO: ${{ inputs.path }}
+        OUTPUT: ${{ inputs.output }}
+        TITLE: ${{ inputs.title }}
+      run: python3 "$GITHUB_ACTION_PATH/tools/make_site.py" --repo "$REPO" --title "$TITLE" "$OUTPUT"
+
+    - name: Compare the WebAssembly build with correctionlib's Python package
+      if: inputs.check == 'true'
+      shell: bash
+      env:
+        REPO: ${{ inputs.path }}
+      run: |
+        mapfile -t files < <(python3 "$GITHUB_ACTION_PATH/tools/make_site.py" --repo "$REPO" --list-only)
+        if [ "${#files[@]}" -eq 0 ]; then
+          echo "No correction files to check."
+          exit 0
+        fi
+        python3 -m venv "$RUNNER_TEMP/correctionlib-viewer"
+        "$RUNNER_TEMP/correctionlib-viewer/bin/pip" install -q "correctionlib==$(cat "$GITHUB_ACTION_PATH/CORRECTIONLIB_VERSION")"
+        cd "$REPO"
+        node "$GITHUB_ACTION_PATH/tools/check_wasm.mjs" "$RUNNER_TEMP/points.json" "${files[@]}"
+        "$RUNNER_TEMP/correctionlib-viewer/bin/python" "$GITHUB_ACTION_PATH/tools/check_wasm.py" "$RUNNER_TEMP/points.json"
