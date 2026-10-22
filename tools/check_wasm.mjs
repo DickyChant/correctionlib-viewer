@@ -12,7 +12,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { gunzipSync } from 'node:zlib';
 import createCorrectionlib from '../dist/correctionlib.mjs';
-import { axisEdges, children, describeCorrection, trace } from '../js/schema.mjs';
+import { axisEdges, children, describeCorrection, parseJSON, trace } from '../js/schema.mjs';
 
 const POINTS_PER_CORRECTION = 3000;
 
@@ -87,7 +87,7 @@ for (const file of files) {
     console.error(`${file}: the WebAssembly build cannot load it: ${error}`);
     process.exit(1);
   }
-  const doc = JSON.parse(text);
+  const doc = parseJSON(text);
   const domains = new Map();
   const edges = new Map();
   for (const c of doc.corrections) {

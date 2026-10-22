@@ -12,8 +12,11 @@ inputs:
   title:
     description: Title of the page.
     default: ''
+  examples:
+    description: Example sets to list after the repository's files, by name (examples/NAME.json in this action), one per line. Downloaded at their pinned sha256.
+    default: ''
   check:
-    description: Evaluate every correction at sampled points with the WebAssembly build and with correctionlib's Python package, and fail if they disagree.
+    description: Evaluate every correction, including the examples', at sampled points with the WebAssembly build and with correctionlib's Python package, and fail if they disagree.
     default: 'true'
 runs:
   using: composite
@@ -24,15 +27,23 @@ runs:
         REPO: ${{ inputs.path }}
         OUTPUT: ${{ inputs.output }}
         TITLE: ${{ inputs.title }}
-      run: python3 "$GITHUB_ACTION_PATH/tools/make_site.py" --repo "$REPO" --title "$TITLE" "$OUTPUT"
+        EXAMPLES: ${{ inputs.examples }}
+      run: |
+        args=()
+        for name in $EXAMPLES; do args+=(--examples "$name"); done
+        python3 "$GITHUB_ACTION_PATH/tools/make_site.py" --repo "$REPO" --title "$TITLE" "${args[@]}" "$OUTPUT"
 
     - name: Compare the WebAssembly build with correctionlib's Python package
       if: inputs.check == 'true'
       shell: bash
       env:
         REPO: ${{ inputs.path }}
+        OUTPUT: ${{ inputs.output }}
       run: |
         mapfile -t files < <(python3 "$GITHUB_ACTION_PATH/tools/make_site.py" --repo "$REPO" --list-only)
+        if [ -d "$OUTPUT/files/examples" ]; then
+          mapfile -t -O "${#files[@]}" files < <(find "$(cd "$OUTPUT" && pwd)/files/examples" -name '*.json*' | sort)
+        fi
         if [ "${#files[@]}" -eq 0 ]; then
           echo "No correction files to check."
           exit 0

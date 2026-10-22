@@ -3,7 +3,7 @@
 // files from the user's disk, a URL or pasted text, and evaluates and plots any
 // correction with correctionlib compiled to WebAssembly. Nothing is uploaded:
 // opened files stay in the browser tab.
-import { axisEdges, children, defaultInputs, describeCorrection, fmt, logLike, substituted, summary, trace } from './schema.mjs';
+import { axisEdges, children, defaultInputs, describeCorrection, fmt, logLike, parseJSON, substituted, summary, trace } from './schema.mjs';
 import { textFromFile, textFromUrl } from './files.mjs';
 import { correctionlib, makeEvaluator } from './wasm.mjs';
 
@@ -64,7 +64,7 @@ async function addSet(id, label, origin, text, extra = {}) {
   old?.evaluator?.delete();
   const set = { id, label, origin, size: text.length, descriptions: new Map(), ...extra };
   try {
-    set.doc = JSON.parse(text);
+    set.doc = parseJSON(text);
   } catch (e) {
     set.error = `not valid JSON: ${e.message}`;
   }
@@ -91,10 +91,15 @@ async function ensureSet(id) {
   if (!state.loading.has(id)) {
     const path = id.slice('repo:'.length);
     state.loading.set(id, textFromUrl(FILES + path)
-      .then((text) => addSet(id, path, 'repo', text, { path }))
+      .then((text) => addSet(id, exampleLabel(path), 'repo', text, { path }))
       .finally(() => state.loading.delete(id)));
   }
   return state.loading.get(id);
+}
+
+// Example files sit under examples/<set id>/; they are shown without that prefix.
+function exampleLabel(path) {
+  return path.replace(/^examples\/[^/]+\//, '');
 }
 
 function targetsOf(set) {
@@ -165,16 +170,28 @@ function renderSidebar() {
   if (state.manifest === null) side.append(h('p', { class: 'meta' }, 'Loading…'));
   else if (!state.manifest) side.append(h('p', { class: 'meta' }, 'No manifest.json next to this page, so no repository files to list.'));
   else {
-    for (const f of state.manifest.files) {
+    // A file of the manifest: from its set once loaded, else from the manifest.
+    const fileBlock = (f) => {
       const set = state.sets.get(`repo:${f.path}`);
-      if (set) side.append(block(set));
-      else {
-        side.append(h('div', { class: 'set' },
-          h('div', { class: 'set-name' }, h('span', {}, f.path)),
-          h('ul', {}, f.corrections.map((c) => h('li', {}, h('a', {
-            href: correctionLink(`repo:${f.path}`, c.name),
-            class: current === decodeURIComponent(correctionLink(`repo:${f.path}`, c.name)) ? 'current' : null,
-          }, c.name))))));
+      if (set) return block(set);
+      return h('div', { class: 'set' },
+        h('div', { class: 'set-name' }, h('span', {}, exampleLabel(f.path))),
+        h('ul', {}, f.corrections.map((c) => h('li', {}, h('a', {
+          href: correctionLink(`repo:${f.path}`, c.name),
+          class: current === decodeURIComponent(correctionLink(`repo:${f.path}`, c.name)) ? 'current' : null,
+        }, c.name)))));
+    };
+    if (!state.manifest.files.length) side.append(h('p', { class: 'meta' }, 'No correction files.'));
+    for (const f of state.manifest.files) side.append(fileBlock(f));
+    // Example sets can hold hundreds of corrections: one folded entry per file,
+    // unfolded for the file being shown.
+    for (const ex of state.manifest.examples || []) {
+      side.append(h('h2', {}, `Example: ${ex.title}`));
+      for (const f of ex.files) {
+        const open = current.startsWith(`#/c/repo:${f.path}/`);
+        side.append(h('details', { class: 'set-fold', open },
+          h('summary', {}, exampleLabel(f.path), h('span', { class: 'meta' }, ` ${f.corrections.length}`)),
+          fileBlock(f)));
       }
     }
   }
@@ -225,23 +242,38 @@ function showRepository() {
       });
       parts.push(det);
     }
+    for (const ex of m.examples || []) {
+      parts.push(
+        h('h2', {}, `Example: ${ex.title}`),
+        h('p', { class: 'lead' }, ex.description ? `${ex.description} ` : '',
+          'From ', h('a', { href: ex.source }, ex.source.replace(/^https?:\/\//, '')),
+          ex.license ? ` (${ex.license})` : '', ', checked against a pinned checksum when this page was built.'),
+        ex.files.map((f) => fileCard(f, ex)));
+    }
   }
   setView(...parts);
 }
 
-function fileCard(f) {
+// A file of the manifest. Files of an example set (`example`) come folded, with
+// a link to where they come from instead of GitHub.
+function fileCard(f, example = null) {
   const id = `repo:${f.path}`;
-  const github = state.manifest.repository
+  const github = !example && state.manifest.repository
     ? `https://github.com/${state.manifest.repository}/blob/${state.manifest.commit || 'main'}/${f.path}` : null;
-  const card = h('section', { class: 'card' },
-    h('div', { class: 'card-head' },
-      h('span', { class: 'path mono' }, f.path),
-      h('span', { class: 'meta' }, bytes(f.size),
-        f.updated ? ` · updated ${f.updated.slice(0, 10)}` : '',
-        f.commit ? [' in ', h('code', {}, f.commit.slice(0, 7))] : ''),
-      github ? h('a', { class: 'meta', href: github }, 'on GitHub') : null,
-      h('a', { class: 'meta', href: FILES + f.path, download: f.path.split('/').pop() }, 'download')),
-    f.description ? h('p', {}, f.description) : null,
+  const head = h('div', { class: 'card-head' },
+    h('span', { class: 'path mono' }, exampleLabel(f.path)),
+    h('span', { class: 'meta' }, bytes(f.size),
+      example ? ` · ${f.corrections.length} correction${f.corrections.length === 1 ? '' : 's'}` : '',
+      f.updated ? ` · updated ${f.updated.slice(0, 10)}` : '',
+      f.commit ? [' in ', h('code', {}, f.commit.slice(0, 7))] : ''),
+    github ? h('a', { class: 'meta', href: github }, 'on GitHub') : null,
+    example ? h('a', { class: 'meta', href: example.source }, 'source') : null,
+    h('a', { class: 'meta', href: FILES + f.path, download: f.path.split('/').pop() }, 'download'));
+  const card = example
+    ? h('details', { class: 'card fold' }, h('summary', {}, head))
+    : h('section', { class: 'card' }, head);
+  card.append(
+    f.description ? h('p', {}, f.description) : '',
     h('div', { class: 'table-wrap' }, h('table', {},
       h('thead', {}, h('tr', {}, h('th', {}, 'Correction'), h('th', {}, 'Inputs'), h('th', {}, 'Output'), h('th', {}, 'Description'))),
       h('tbody', {}, f.corrections.map((c) => h('tr', {},
@@ -368,7 +400,7 @@ async function showCorrection(setId, name) {
   const c = target.item;
   const d = describe(set, target);
   const key = `${setId}\n${name}`;
-  if (!state.views.has(key)) state.views.set(key, { values: defaultInputs(d), plot: defaultPlot(d) });
+  if (!state.views.has(key)) state.views.set(key, { values: defaultInputs(d, target.kind === 'correction' ? target.item : null), plot: defaultPlot(d) });
   const vs = state.views.get(key);
 
   const resultBox = h('div', { class: 'result' });

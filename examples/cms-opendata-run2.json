@@ -1,0 +1,8 @@
+{
+  "title": "CMS Open Data: physics object corrections for Run 2",
+  "description": "The corrections CMS released with its 2016 open data: b and c tagging, electrons and photons, jets, MET, pileup, muons and taus. Mostly the 2016 post-VFP UL campaign.",
+  "source": "https://opendata.cern.ch/record/12508",
+  "license": "CC0-1.0",
+  "archive": "https://opendata.cern.ch/record/12508/files/jsonpog-integration-2016post.tar",
+  "sha256": "113730e8bd3e72ecb9548cb158c8990579022432d202416317828f4bce3eb28a"
+}

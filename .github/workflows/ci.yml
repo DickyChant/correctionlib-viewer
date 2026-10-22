@@ -1,7 +1,9 @@
 # Builds correctionlib for WebAssembly and requires the result to be the
 # committed dist/, so that the action ships exactly what the sources give. Then
 # runs the action on this repository, whose one correction file is
-# tools/node_types.json (every node type), and publishes that page from main.
+# tools/node_types.json (every node type), with the CMS Open Data corrections
+# as examples, and publishes that page from main. The action's check compares
+# every one of those corrections with correctionlib's Python package.
 #
 # Pages has to be set to "GitHub Actions" in the repository settings once.
 name: CI
@@ -38,6 +40,8 @@ jobs:
           test -z "$(git status --porcelain -- dist)"
 
       - uses: ./
+        with:
+          examples: cms-opendata-run2
 
       - uses: actions/upload-pages-artifact@v5
         with:

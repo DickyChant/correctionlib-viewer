@@ -5,6 +5,10 @@ files of a repository and evaluates and plots any correction in the browser,
 with correctionlib's own C++ evaluator compiled to WebAssembly. It is also a
 GitHub Action that publishes that page for a repository.
 
+**Live:** <https://dickychant.github.io/correctionlib-viewer/>, with the
+corrections CMS released with its 2016 open data as examples
+([CERN Open Data record 12508](https://opendata.cern.ch/record/12508)).
+
 - **Repository view.** Every correction file in the repository, with its
   corrections, their inputs and the README of its directory.
 - **Open a file.** Drop a `.json` or `.json.gz` file on the page, choose one,
@@ -63,11 +67,22 @@ needs `python3` and `node`, which GitHub's Ubuntu runners have.
 | `path` | `.` | the repository with the corrections |
 | `output` | `_site` | directory to write the site to |
 | `title` | `correctionlib viewer` | title of the page |
+| `examples` | | example sets to list after the repository's files, by name, e.g. `cms-opendata-run2` (below) |
 | `check` | `true` | compare the WebAssembly build with correctionlib's Python package on every correction (below) |
 
 A correction file is any `*.json` or `*.json.gz` tracked by git outside
 `.github/` whose top level has a `corrections` list. The README.md of its
 directory is shown with it.
+
+### Example sets
+
+An example set is a JSON file in `examples/`: an archive of correction files
+to download, its sha256, where it comes from and its licence. They are fetched
+when the site is built, never committed. There is one so far:
+
+| Name | What |
+|---|---|
+| `cms-opendata-run2` | [CMS Open Data record 12508](https://opendata.cern.ch/record/12508), "Physics object corrections for Run 2" (CC0-1.0): 19 files, 341 corrections. b and c tagging, electrons and photons, jets, MET, pileup, muons and taus, mostly for 2016 post-VFP UL. |
 
 ## How it evaluates
 
@@ -87,7 +102,11 @@ version. `tools/check_wasm.mjs` samples 3000 points per correction in each
 input's domain, on bin edges, outside them and on missing keys, and
 `tools/check_wasm.py` requires the same value (to 1e-12) or an error from both.
 CI does the same on `tools/node_types.json`, a test file with every node type
-except lwtnn.
+except lwtnn, and on the CMS examples: 1,023,000 points, all in agreement.
+
+Files may write numbers as the bare `NaN`, `Infinity` and `-Infinity` that
+Python's json module emits, as many of CMS's do. correctionlib reads them, and
+so does the page, although they are not JSON.
 
 One known difference: a `hashprng` node with the `stdnormal` distribution.
 correctionlib draws it with `std::normal_distribution`, whose algorithm the C++
@@ -129,6 +148,7 @@ docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD":/src -w /src \
 | `tools/make_site.py` | stages the site and writes `manifest.json`, the list of correction files the page shows |
 | `tools/check_wasm.mjs`, `tools/check_wasm.py` | the check against correctionlib's Python package |
 | `tools/node_types.json` | test file with every node type except lwtnn; not a correction |
+| `examples/` | example sets |
 
 ## License
 

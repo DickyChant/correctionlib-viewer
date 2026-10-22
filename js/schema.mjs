@@ -3,6 +3,35 @@
 // Evaluation itself is left to the WebAssembly build of correctionlib; this
 // module only describes the JSON.
 
+// Parses a correctionlib file. correctionlib's parser (RapidJSON) also takes
+// the bare numbers NaN, Inf, Infinity, -Inf and -Infinity, which Python's json
+// module writes and many published files contain; JSON.parse does not. Such a
+// file is parsed with those numbers swapped for marker strings, which the
+// reviver turns back into numbers. The marker starts with U+0000, which a
+// correctionlib string has no reason to.
+export function parseJSON(text) {
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    const tokens = /"(?:[^"\\]|\\.)*"|(-?Inf(?:inity)?|NaN)/g;
+    const out = [];
+    let last = 0;
+    for (let m; (m = tokens.exec(text)); ) {
+      if (m[1] === undefined) continue;
+      out.push(text.slice(last, m.index), `"\\u0000${m[1]}"`);
+      last = m.index + m[0].length;
+    }
+    if (!out.length) throw e;
+    out.push(text.slice(last));
+    try {
+      return JSON.parse(out.join(''), (_, v) =>
+        typeof v === 'string' && v.charCodeAt(0) === 0 ? (v.endsWith('NaN') ? NaN : v[1] === '-' ? -Infinity : Infinity) : v);
+    } catch {
+      throw e; // report the original error, at a position in the user's text
+    }
+  }
+}
+
 // Bin edges may be written as the strings "inf", "+inf" and "-inf".
 export function edgeValue(e) {
   if (typeof e === 'number') return e;
@@ -175,13 +204,24 @@ function addEdges(dom, edges) {
   }
 }
 
-// A starting value for each input: the first key for string inputs and keyed
-// integers; for binned numbers the median of the distinct bin edges, which sits
-// where the binning is densest (for log-spaced edges, the geometric middle);
-// else 1.
-export function defaultInputs(description) {
-  return description.inputs.map((v) => {
-    if (v.keys.length) return v.keys[0];
+// Keys taken first when a category offers them: the central value rather than
+// a variation.
+const PREFERRED_KEYS = /^(nominal|central|nom|sf)$/i;
+
+function preferredKey(keys) {
+  return keys.find((k) => typeof k === 'string' && PREFERRED_KEYS.test(k)) ?? keys[0];
+}
+
+// A starting value for each input, chosen to land on a value: the tree is
+// walked from the root, and each input takes its value at the first node that
+// tests it (for a category, a central key if there is one, else the first; for
+// a binning, the centre of the middle bin). A transform is walked through as
+// if it changed nothing. Inputs the walk never reaches take the preferred key,
+// the median of their distinct bin edges, or 1. `correction` may be omitted,
+// e.g. for a compound correction, which has no tree of its own.
+export function defaultInputs(description, correction = null) {
+  const values = description.inputs.map((v) => {
+    if (v.keys.length) return preferredKey(v.keys);
     if (v.type === 'string') return '';
     if (v.edges?.length) {
       const e = v.edges;
@@ -190,6 +230,52 @@ export function defaultInputs(description) {
     }
     return 1;
   });
+  if (!correction?.data) return values;
+  const index = new Map(correction.inputs.map((v, i) => [v.name, i]));
+  const set = new Set();
+  const choose = (name, edges) => {
+    const i = index.get(name);
+    if (i === undefined) return;
+    if (!set.has(i)) {
+      const n = edges.length - 1;
+      const k = Math.floor(n / 2);
+      let x = (edges[k] + edges[k + 1]) / 2;
+      if (!Number.isFinite(x)) x = Number.isFinite(edges[k]) ? edges[k] : edges[k + 1];
+      if (Number.isFinite(x)) values[i] = correction.inputs[i].type === 'int' ? Math.round(x) : x;
+      set.add(i);
+    }
+    return Number(values[i]);
+  };
+  let node = correction.data;
+  for (let guard = 0; guard < 1000 && isNode(node); ++guard) {
+    if (node.nodetype === 'category') {
+      const i = index.get(node.input);
+      if (i !== undefined && !set.has(i)) {
+        values[i] = preferredKey(node.content.map((it) => it.key));
+        set.add(i);
+      }
+      const x = i === undefined ? undefined : values[i];
+      const item = node.content.find((it) => it.key === x || (typeof it.key === 'number' && Number(x) === it.key));
+      node = item ? item.value : node.default;
+    } else if (node.nodetype === 'binning') {
+      const e = axisEdges(node.edges);
+      const r = locate(e, choose(node.input, e), node.flow);
+      node = r.error ? null : r.flowNode ? node.flow : node.content[r.bin];
+    } else if (node.nodetype === 'multibinning') {
+      const axes = node.edges.map(axisEdges);
+      let flat = 0;
+      for (let d = 0; d < axes.length && flat >= 0; ++d) {
+        const r = locate(axes[d], choose(node.inputs[d], axes[d]), node.flow);
+        flat = r.error || r.flowNode ? -1 : flat * (axes[d].length - 1) + r.bin;
+      }
+      node = flat >= 0 ? node.content[flat] : null;
+    } else if (node.nodetype === 'transform') {
+      node = node.content;
+    } else {
+      break;
+    }
+  }
+  return values;
 }
 
 // Whether a binned input is better plotted on a log axis: non-negative, with
